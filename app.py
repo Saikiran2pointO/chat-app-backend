@@ -98,7 +98,7 @@ def handle_user_joined(data):
 def handle_clear():
     # request.sid is the unique ID of the person who clicked the button
     # We only send the 'chat_cleared' signal back to THEM
-    emit('chat_cleared', to=request.sid)
+    emit('chat_cleared', {"status": "success"}, to=request.sid)
     
     # Optional: If you want to actually delete their history from the database:
     # username = get_username_from_sid(request.sid) 
