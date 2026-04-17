@@ -1,8 +1,11 @@
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit, join_room
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'dev_key_123'
