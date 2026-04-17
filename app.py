@@ -1,13 +1,14 @@
 import eventlet
 eventlet.monkey_patch()
 from flask import Flask, jsonify, request
+from flask_cors import CORS  # <--- NEW IMPORT
 from flask_socketio import SocketIO, emit, join_room
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
-
 app = Flask(__name__)
+CORS(app)  # <--- NEW VIP PASS (Must be right under app = Flask)
 app.config['SECRET_KEY'] = 'dev_key_123'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
