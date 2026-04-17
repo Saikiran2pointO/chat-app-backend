@@ -95,9 +95,14 @@ def handle_user_joined(data):
     emit('update_active_users', list(set(active_users.values())), broadcast=True)
 
 @socketio.on('request_clear')
-def handle_clear_request():
-    messages_collection.delete_many({})
-    emit('chat_cleared', {'status': 'success'}, broadcast=True)
+def handle_clear():
+    # request.sid is the unique ID of the person who clicked the button
+    # We only send the 'chat_cleared' signal back to THEM
+    emit('chat_cleared', to=request.sid)
+    
+    # Optional: If you want to actually delete their history from the database:
+    # username = get_username_from_sid(request.sid) 
+    # db.messages.delete_many({"$or": [{"sender": username}, {"receiver": username}]})
 
 @socketio.on('send_message')
 def handle_new_message(data):
