@@ -49,6 +49,57 @@ def login_user():
 
     return jsonify({"message": "Login successful"}), 200
 
+@app.route('/friends/<username>', methods=['GET'])
+def get_friend_data(username):
+    user = users_collection.find_one({"username": username})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+        
+    return jsonify({
+        "friends": user.get('friends', []),
+        "pending_requests": user.get('pending_requests', [])
+    }), 200
+
+@app.route('/friend_request', methods=['POST'])
+def send_friend_request():
+    data = request.json
+    sender = data.get('sender')
+    receiver = data.get('receiver')
+
+    if sender == receiver:
+        return jsonify({"error": "Cannot add yourself"}), 400
+
+    target_user = users_collection.find_one({"username": receiver})
+    if not target_user:
+        return jsonify({"error": "User does not exist"}), 404
+
+    # Prevent duplicate requests or adding someone who is already a friend
+    if sender in target_user.get('pending_requests', []) or sender in target_user.get('friends', []):
+        return jsonify({"error": "Request already sent or already friends"}), 400
+
+    users_collection.update_one(
+        {"username": receiver},
+        {"$addToSet": {"pending_requests": sender}}
+    )
+    return jsonify({"message": "Friend request sent!"}), 200
+
+@app.route('/accept_request', methods=['POST'])
+def accept_friend_request():
+    data = request.json
+    receiver = data.get('receiver') # The person who clicked 'Accept'
+    sender = data.get('sender')     # The person who sent the request originally
+
+    # Add each other to their respective friends lists and remove from pending
+    users_collection.update_one(
+        {"username": receiver},
+        {"$addToSet": {"friends": sender}, "$pull": {"pending_requests": sender}}
+    )
+    users_collection.update_one(
+        {"username": sender},
+        {"$addToSet": {"friends": receiver}}
+    )
+    return jsonify({"message": "Request accepted!"}), 200
+
 @app.route('/history/<username>', methods=['GET'])
 def get_history(username):
     query = {
@@ -112,17 +163,28 @@ def handle_clear():
 
 @socketio.on('send_message')
 def handle_new_message(data):
-    data['timestamp'] = datetime.utcnow().isoformat()
-    receiver = data.get('receiver', 'Global')
+    sender = data.get('sender')
+    receiver = data.get('receiver')
     
+    # Check if they are friends in the database
+    sender_data = users_collection.find_one({"username": sender})
+    
+    # If they aren't friends, block the message
+    if receiver not in sender_data.get('friends', []):
+        emit('receive_message', {
+            "sender": "System", 
+            "content": f"You are not friends with {receiver}.", 
+            "receiver": sender
+        }, to=request.sid)
+        return
+
+    data['timestamp'] = datetime.utcnow().isoformat()
     messages_collection.insert_one(data.copy())
     
-    if receiver == 'Global':
-        emit('receive_message', data, broadcast=True)
-    else:
-        emit('receive_message', data, to=receiver)
-        if data['sender'] != receiver:
-            emit('receive_message', data, to=data['sender'])
+    # Route the message
+    emit('receive_message', data, to=receiver)
+    if sender != receiver:
+        emit('receive_message', data, to=sender)
 
 if __name__ == '__main__':
     print("🚀 Starting server on http://localhost:5000...")
