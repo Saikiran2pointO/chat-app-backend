@@ -1,23 +1,23 @@
 import eventlet
 eventlet.monkey_patch()
 from flask import Flask, jsonify, request
-from flask_cors import CORS  # <--- NEW IMPORT
+from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # <--- NEW VIP PASS (Must be right under app = Flask)
+CORS(app)
 app.config['SECRET_KEY'] = 'dev_key_123'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# Connect to MongoDB
 client = MongoClient('mongodb+srv://chat_admin:mg160426@cluster0.xsdf5ih.mongodb.net/?appName=Cluster0')
 db = client['chat_app_db']
 messages_collection = db['messages']
 users_collection = db['users']
 
-# ---> NEW: Dictionary to track who is online (Session ID -> Username) <---
 active_users = {}
 
 @app.route('/register', methods=['POST'])
@@ -33,6 +33,8 @@ def register_user():
     users_collection.insert_one({
         "username": username,
         "password": hashed_password,
+        "friends": [],
+        "pending_requests": [],
         "created_at": datetime.utcnow().isoformat()
     })
     return jsonify({"message": "Registration successful"}), 201
@@ -48,6 +50,17 @@ def login_user():
         return jsonify({"error": "Invalid username or password"}), 401
 
     return jsonify({"message": "Login successful"}), 200
+
+@app.route('/history/<username>', methods=['GET'])
+def get_history(username):
+    query = {
+        "$or": [
+            {"receiver": username},
+            {"sender": username}
+        ]
+    }
+    messages = list(messages_collection.find(query, {"_id": 0}))
+    return jsonify(messages)
 
 @app.route('/friends/<username>', methods=['GET'])
 def get_friend_data(username):
@@ -66,15 +79,22 @@ def send_friend_request():
     sender = data.get('sender')
     receiver = data.get('receiver')
 
-    # ... (keep your existing error checks here) ...
+    if sender == receiver:
+        return jsonify({"error": "Cannot add yourself"}), 400
+
+    target_user = users_collection.find_one({"username": receiver})
+    if not target_user:
+        return jsonify({"error": "User does not exist"}), 404
+
+    if sender in target_user.get('pending_requests', []) or sender in target_user.get('friends', []):
+        return jsonify({"error": "Request already sent or already friends"}), 400
 
     users_collection.update_one(
         {"username": receiver},
         {"$addToSet": {"pending_requests": sender}}
     )
     
-    # NEW: Tell the receiver "Hey, you have a new request!"
-    # We send this to the 'room' named after the receiver's username
+    # Notify receiver in real-time
     socketio.emit('new_friend_request', {"from": sender}, to=receiver)
     
     return jsonify({"message": "Friend request sent!"}), 200
@@ -85,74 +105,45 @@ def accept_friend_request():
     receiver = data.get('receiver') 
     sender = data.get('sender')     
 
-    # ... (keep your existing database updates here) ...
-    users_collection.update_one({"username": receiver}, {"$addToSet": {"friends": sender}, "$pull": {"pending_requests": sender}})
-    users_collection.update_one({"username": sender}, {"$addToSet": {"friends": receiver}})
+    users_collection.update_one(
+        {"username": receiver},
+        {"$addToSet": {"friends": sender}, "$pull": {"pending_requests": sender}}
+    )
+    users_collection.update_one(
+        {"username": sender},
+        {"$addToSet": {"friends": receiver}}
+    )
 
-    # NEW: Tell BOTH users to refresh their friend lists immediately
+    # Notify both users in real-time
     socketio.emit('friend_request_accepted', {"with": sender}, to=receiver)
     socketio.emit('friend_request_accepted', {"with": receiver}, to=sender)
     
     return jsonify({"message": "Request accepted!"}), 200
-@app.route('/history/<username>', methods=['GET'])
-def get_history(username):
-    query = {
-        "$or": [
-            {"receiver": "Global"},
-            {"receiver": {"$exists": False}},
-            {"receiver": username},
-            {"sender": username, "receiver": {"$ne": "Global"}}
-        ]
-    }
-    messages = list(messages_collection.find(query, {"_id": 0}))
-    return jsonify(messages)
-
-@app.route('/clear', methods=['DELETE'])
-def clear_history():
-    messages_collection.delete_many({})
-    socketio.emit('chat_cleared', broadcast=True)
-    return jsonify({"status": "cleared"})
 
 @socketio.on('connect')
 def handle_connect():
-    print("🟢 A client connected!")
+    pass
 
-# ---> UPDATED: Handle disconnections and update the active list <---
 @socketio.on('disconnect')
 def handle_disconnect():
-    print("🔴 A client disconnected!")
-    # If the disconnected user was logged in, remove them from the active list
     if request.sid in active_users:
         disconnected_user = active_users.pop(request.sid)
-        print(f"👋 {disconnected_user} left.")
-        # Broadcast the updated list of unique usernames
         emit('update_active_users', list(set(active_users.values())), broadcast=True)
 
-# ---> UPDATED: Add user to active list when they log in <---
 @socketio.on('user_joined')
 def handle_user_joined(data):
     username = data.get('username')
     join_room(username)
-    
-    # Map their unique connection ID to their username
     active_users[request.sid] = username
-    
-    # Broadcast the updated list to everyone
     emit('update_active_users', list(set(active_users.values())), broadcast=True)
 
 @socketio.on('request_clear')
 def handle_clear():
-    # 1. Look up the username of the person who clicked the button
     username = active_users.get(request.sid)
-    
     if username:
-        # 2. Tell MongoDB to delete all messages involving this user
         messages_collection.delete_many({
             "$or": [{"sender": username}, {"receiver": username}]
         })
-        print(f"🗑️ Deleted chat history for {username}")
-
-    # 3. Send the signal to wipe their frontend screen
     emit('chat_cleared', {"status": "success"}, to=request.sid)
 
 @socketio.on('send_message')
@@ -160,10 +151,8 @@ def handle_new_message(data):
     sender = data.get('sender')
     receiver = data.get('receiver')
     
-    # Check if they are friends in the database
     sender_data = users_collection.find_one({"username": sender})
     
-    # If they aren't friends, block the message
     if receiver not in sender_data.get('friends', []):
         emit('receive_message', {
             "sender": "System", 
@@ -171,37 +160,26 @@ def handle_new_message(data):
             "receiver": sender
         }, to=request.sid)
         return
+
     data['timestamp'] = datetime.utcnow().isoformat()
-    data['status'] = 'sent' # Initial status
+    data['seen'] = False  # Start as unseen
     
-    # Insert and get the unique ID (using string for the frontend)
-    msg_id = messages_collection.insert_one(data.copy()).inserted_id
-    data['msg_id'] = str(msg_id) 
+    messages_collection.insert_one(data.copy())
     
-    emit('receive_message', data, to=receiver)
-    emit('receive_message', data, to=sender) # Echo back to sender
-    # data['timestamp'] = datetime.utcnow().isoformat()
-    # messages_collection.insert_one(data.copy())
-    
-    # Route the message
     emit('receive_message', data, to=receiver)
     if sender != receiver:
         emit('receive_message', data, to=sender)
 
 @socketio.on('message_seen')
 def handle_message_seen(data):
-    viewer = data.get('viewer') # The person who read the messages
-    sender = data.get('sender') # The person who sent them
-    
-    # Update all 'sent' messages from that sender to 'seen' in the database
+    sender = data.get('sender')
+    receiver = data.get('receiver')
+
     messages_collection.update_many(
-        {"sender": sender, "receiver": viewer, "status": "sent"},
-        {"$set": {"status": "seen"}}
+        {"sender": sender, "receiver": receiver, "seen": {"$ne": True}},
+        {"$set": {"seen": True}}
     )
-    
-    # Notify the original sender so their UI updates the ticks
-    emit('update_msg_status', {"sender": sender, "viewer": viewer, "status": "seen"}, to=sender)
+    emit('messages_marked_seen', {"seen_by": receiver}, to=sender)
 
 if __name__ == '__main__':
-    print("🚀 Starting server on http://localhost:5000...")
     socketio.run(app, debug=True, port=5000)
