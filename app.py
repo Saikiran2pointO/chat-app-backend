@@ -171,9 +171,17 @@ def handle_new_message(data):
             "receiver": sender
         }, to=request.sid)
         return
-
     data['timestamp'] = datetime.utcnow().isoformat()
-    messages_collection.insert_one(data.copy())
+    data['status'] = 'sent' # Initial status
+    
+    # Insert and get the unique ID (using string for the frontend)
+    msg_id = messages_collection.insert_one(data.copy()).inserted_id
+    data['msg_id'] = str(msg_id) 
+    
+    emit('receive_message', data, to=receiver)
+    emit('receive_message', data, to=sender) # Echo back to sender
+    # data['timestamp'] = datetime.utcnow().isoformat()
+    # messages_collection.insert_one(data.copy())
     
     # Route the message
     emit('receive_message', data, to=receiver)
