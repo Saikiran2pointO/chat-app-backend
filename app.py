@@ -188,6 +188,20 @@ def handle_new_message(data):
     if sender != receiver:
         emit('receive_message', data, to=sender)
 
+@socketio.on('message_seen')
+def handle_message_seen(data):
+    viewer = data.get('viewer') # The person who read the messages
+    sender = data.get('sender') # The person who sent them
+    
+    # Update all 'sent' messages from that sender to 'seen' in the database
+    messages_collection.update_many(
+        {"sender": sender, "receiver": viewer, "status": "sent"},
+        {"$set": {"status": "seen"}}
+    )
+    
+    # Notify the original sender so their UI updates the ticks
+    emit('update_msg_status', {"sender": sender, "viewer": viewer, "status": "seen"}, to=sender)
+
 if __name__ == '__main__':
     print("🚀 Starting server on http://localhost:5000...")
     socketio.run(app, debug=True, port=5000)
