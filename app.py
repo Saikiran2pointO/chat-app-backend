@@ -66,40 +66,34 @@ def send_friend_request():
     sender = data.get('sender')
     receiver = data.get('receiver')
 
-    if sender == receiver:
-        return jsonify({"error": "Cannot add yourself"}), 400
-
-    target_user = users_collection.find_one({"username": receiver})
-    if not target_user:
-        return jsonify({"error": "User does not exist"}), 404
-
-    # Prevent duplicate requests or adding someone who is already a friend
-    if sender in target_user.get('pending_requests', []) or sender in target_user.get('friends', []):
-        return jsonify({"error": "Request already sent or already friends"}), 400
+    # ... (keep your existing error checks here) ...
 
     users_collection.update_one(
         {"username": receiver},
         {"$addToSet": {"pending_requests": sender}}
     )
+    
+    # NEW: Tell the receiver "Hey, you have a new request!"
+    # We send this to the 'room' named after the receiver's username
+    socketio.emit('new_friend_request', {"from": sender}, to=receiver)
+    
     return jsonify({"message": "Friend request sent!"}), 200
 
 @app.route('/accept_request', methods=['POST'])
 def accept_friend_request():
     data = request.json
-    receiver = data.get('receiver') # The person who clicked 'Accept'
-    sender = data.get('sender')     # The person who sent the request originally
+    receiver = data.get('receiver') 
+    sender = data.get('sender')     
 
-    # Add each other to their respective friends lists and remove from pending
-    users_collection.update_one(
-        {"username": receiver},
-        {"$addToSet": {"friends": sender}, "$pull": {"pending_requests": sender}}
-    )
-    users_collection.update_one(
-        {"username": sender},
-        {"$addToSet": {"friends": receiver}}
-    )
+    # ... (keep your existing database updates here) ...
+    users_collection.update_one({"username": receiver}, {"$addToSet": {"friends": sender}, "$pull": {"pending_requests": sender}})
+    users_collection.update_one({"username": sender}, {"$addToSet": {"friends": receiver}})
+
+    # NEW: Tell BOTH users to refresh their friend lists immediately
+    socketio.emit('friend_request_accepted', {"with": sender}, to=receiver)
+    socketio.emit('friend_request_accepted', {"with": receiver}, to=sender)
+    
     return jsonify({"message": "Request accepted!"}), 200
-
 @app.route('/history/<username>', methods=['GET'])
 def get_history(username):
     query = {
