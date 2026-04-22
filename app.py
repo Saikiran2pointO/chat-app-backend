@@ -31,6 +31,7 @@ def register_user():
     data = request.json
     username = data.get('username')
     password = data.get('password')
+    public_key = data.get('public_key') # NEW: Grab the key from the frontend
 
     if users_collection.find_one({"username": username}):
         return jsonify({"error": "Username already taken"}), 400
@@ -39,12 +40,12 @@ def register_user():
     users_collection.insert_one({
         "username": username,
         "password": hashed_password,
+        "public_key": public_key, # NEW: Save it to the database
         "friends": [],
         "pending_requests": [],
         "created_at": datetime.utcnow().isoformat()
     })
     return jsonify({"message": "Registration successful"}), 201
-
 @app.route('/login', methods=['POST'])
 def login_user():
     data = request.json
@@ -74,8 +75,18 @@ def get_friend_data(username):
     if not user:
         return jsonify({"error": "User not found"}), 404
         
+    friends_list = user.get('friends', [])
+    
+    # NEW: Fetch public keys for all friends
+    friends_with_keys = {}
+    for friend_name in friends_list:
+        friend_doc = users_collection.find_one({"username": friend_name})
+        if friend_doc and 'public_key' in friend_doc:
+            friends_with_keys[friend_name] = friend_doc['public_key']
+
     return jsonify({
-        "friends": user.get('friends', []),
+        "friends": friends_list,
+        "friend_keys": friends_with_keys, # NEW: Send the keys to the browser
         "pending_requests": user.get('pending_requests', [])
     }), 200
 
