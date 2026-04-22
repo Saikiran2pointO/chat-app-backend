@@ -1,3 +1,4 @@
+import os
 import eventlet
 eventlet.monkey_patch()
 from flask import Flask, jsonify, request
@@ -9,13 +10,15 @@ from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
-app.config['SECRET_KEY'] = 'dev_key_123'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fallback_key_for_local_testing')
 # New way: ONLY accepts connections from your exact Netlify website
 CORS(app, resources={r"/*": {"origins": "https://creative-fox-3bfdbb.netlify.app"}})
 socketio = SocketIO(app, cors_allowed_origins="https://creative-fox-3bfdbb.netlify.app")
 
-# Connect to MongoDB
-client = MongoClient('mongodb+srv://chat_admin:mg160426@cluster0.xsdf5ih.mongodb.net/?appName=Cluster0')
+# 2. Hide the Database URL
+# It will look for 'MONGO_URI' on Render. If it can't find it, it crashes (which is safer than leaking!)
+mongo_uri = os.environ.get('MONGO_URI') 
+client = MongoClient(mongo_uri)
 db = client['chat_app_db']
 messages_collection = db['messages']
 users_collection = db['users']
