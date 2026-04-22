@@ -10,7 +10,9 @@ from datetime import datetime
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = 'dev_key_123'
-socketio = SocketIO(app, cors_allowed_origins="*")
+# New way: ONLY accepts connections from your exact Netlify website
+CORS(app, resources={r"/*": {"origins": "https://creative-fox-3bfdbb.netlify.app"}})
+socketio = SocketIO(app, cors_allowed_origins="https://creative-fox-3bfdbb.netlify.app")
 
 # Connect to MongoDB
 client = MongoClient('mongodb+srv://chat_admin:mg160426@cluster0.xsdf5ih.mongodb.net/?appName=Cluster0')
