@@ -51,10 +51,15 @@ def login_user():
     data = request.json
     username = data.get('username')
     password = data.get('password')
+    public_key = data.get('public_key') # NEW: Grab the key on login too
 
     user = users_collection.find_one({"username": username})
     if not user or not check_password_hash(user['password'], password):
         return jsonify({"error": "Invalid username or password"}), 401
+
+    # NEW: Overwrite the old public key with the active one from the browser
+    if public_key:
+        users_collection.update_one({"username": username}, {"$set": {"public_key": public_key}})
 
     return jsonify({"message": "Login successful"}), 200
 
