@@ -12,8 +12,9 @@ app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fallback_key_for_local_testing')
 # New way: ONLY accepts connections from your exact Netlify website
-CORS(app, resources={r"/*": {"origins": "https://creative-fox-3bfdbb.netlify.app"}})
-socketio = SocketIO(app, cors_allowed_origins="https://creative-fox-3bfdbb.netlify.app")
+socketio = SocketIO(app, cors_allowed_origins="*")
+#CORS(app, resources={r"/*": {"origins": "https://creative-fox-3bfdbb.netlify.app"}})
+#socketio = SocketIO(app, cors_allowed_origins="https://creative-fox-3bfdbb.netlify.app")
 
 # 2. Hide the Database URL
 # It will look for 'MONGO_URI' on Render. If it can't find it, it crashes (which is safer than leaking!)
